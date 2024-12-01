@@ -6,7 +6,6 @@ part1 = id
 
 main :: IO ()
 main = do
-  input <- readFile "input.txt"
-  let parsed = parseInput input
+  input <- parseInput <$> readFile "input.txt"
   putStrLn "Part 1"
-  print $ part1 parsed
+  print $ part1 input
