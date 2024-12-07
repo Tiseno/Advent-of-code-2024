@@ -11,28 +11,34 @@ parseInput input = parseLine <$> lines input
       let [test, ns] = Split.splitOn ":" l
        in (read test, fmap read (words ns))
 
-operators :: [Int -> Int -> Int]
-operators = [(+), (*)]
+data Op = Add | Mul | Cat
 
-allResults :: Int -> Int -> [Int]
-allResults acc (n::Int) = do
+perform :: (Num a, Read a, Show a) => Op -> a -> a -> a
+perform Add a b = a + b
+perform Mul a b = a * b
+perform Cat a b = read (show a ++ show b)
+
+allResults :: [Op] -> Int -> Int -> [Int]
+allResults operators acc n = do
   op <- operators
   case acc of
     (-1) -> [n]
-    prev -> [op prev n]
+    prev -> [perform op prev n]
 
-validEquation :: (Int, [Int]) -> Maybe Int
-validEquation (testValue, numbers) =
-  if testValue `elem` Monad.foldM allResults (-1) numbers
+validEquation :: [Op] -> (Int, [Int]) -> Maybe Int
+validEquation operators (testValue, numbers) =
+  if testValue `elem` Monad.foldM (allResults operators) (-1) numbers
      then Just testValue
      else Nothing
 
-part1 :: [(Int, [Int])] -> Int
-part1 (equations :: [(Int, [Int])]) = sum $ Maybe.mapMaybe validEquation equations
+solve :: [Op] -> [(Int, [Int])] -> Int
+solve operators equations = sum $ Maybe.mapMaybe (validEquation operators) equations
 
 main :: IO ()
 main = do
   input <- parseInput <$> readFile "input.txt"
   putStrLn "Part 1"
-  print $ part1 input
+  print $ solve [Add, Mul] input
+  putStrLn "Part 2"
+  print $ solve [Add, Mul, Cat] input
 
