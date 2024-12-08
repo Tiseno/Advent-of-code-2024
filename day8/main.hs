@@ -11,8 +11,8 @@ parseInput input =
       antennas = [((x, y), c) | (y, row) <- zip [0..] $ lines input, (x, c) <- zip [0..] row, c /= '.']
    in ((width, height), antennas)
 
-createAntiNodesForPair :: ((Int, Int), (Int, Int)) -> [(Int, Int)]
-createAntiNodesForPair ((xA, yA), (xB, yB)) =
+createBasicAntiNodesForPair :: (Int, Int) -> ((Int, Int), (Int, Int)) -> [(Int, Int)]
+createBasicAntiNodesForPair _ ((xA, yA), (xB, yB)) =
   let xD = xA - xB
       yD = yA - yB
    in [(xA + xD, yA + yD), (xB - xD, yB - yD)]
@@ -20,17 +20,32 @@ createAntiNodesForPair ((xA, yA), (xB, yB)) =
 allPairs :: Eq a => [a] -> [(a, a)]
 allPairs list = [(a, b) | (i, a) <- zip [(0 :: Int)..] list, (j, b) <- zip [(0 :: Int)..] list, j > i]
 
-createAntiNodesFromAntennas :: [(Int, Int)] -> [(Int, Int)]
-createAntiNodesFromAntennas antennaPositions = concatMap createAntiNodesForPair $ allPairs antennaPositions
+createAntiNodesFromAntennas :: (Int, Int) -> ((Int, Int) -> ((Int, Int), (Int, Int)) -> [(Int, Int)]) -> [(Int, Int)] -> [(Int, Int)]
+createAntiNodesFromAntennas bounds createAntiNodeFunction antennaPositions = concatMap (createAntiNodeFunction bounds) $ allPairs antennaPositions
 
 inBounds :: (Int, Int) -> (Int, Int) -> Bool
 inBounds (width, height) (x, y) = x >= 0 && x < width && y >= 0 && y < height
 
-part1 :: ((Int, Int), [((Int, Int), Char)]) -> Int
-part1 ((bounds, antennas) :: ((Int, Int), [((Int, Int), Char)])) = length $ Set.fromList $ concatMap (filter (inBounds bounds) . createAntiNodesFromAntennas) (MultiMap.elems (foldr (\(pos, c) m -> MultiMap.insert c pos m) MultiMap.empty antennas))
+solve :: ((Int, Int) -> ((Int, Int), (Int, Int)) -> [(Int, Int)]) -> ((Int, Int), [((Int, Int), Char)]) -> Int
+solve createAntiNodeFunction (bounds, antennas) =
+  let groupedAntennas = MultiMap.elems (foldr (\(pos, c) m -> MultiMap.insert c pos m) MultiMap.empty antennas)
+      antiNodes = concatMap (createAntiNodesFromAntennas bounds createAntiNodeFunction) groupedAntennas
+   in length $ Set.fromList $ filter (inBounds bounds) antiNodes
+
+rangeUntilOutOfBounds :: (Int, Int) -> (Int, Int) -> (Int, Int) -> [(Int, Int)]
+rangeUntilOutOfBounds bounds pos@(x, y) step@(dx, dy) =
+  if inBounds bounds pos then pos : rangeUntilOutOfBounds bounds (x + dx, y + dy) step else []
+
+createAntiNodesForPairWithResonantHarmonics :: (Int, Int) -> ((Int, Int), (Int, Int)) -> [(Int, Int)]
+createAntiNodesForPairWithResonantHarmonics bounds (a@(xA, yA), b@(xB, yB)) =
+  let xD = xA - xB
+      yD = yA - yB
+   in rangeUntilOutOfBounds bounds a (xD, yD) ++ rangeUntilOutOfBounds bounds b (-xD, -yD)
 
 main :: IO ()
 main = do
   input <- parseInput <$> readFile "input.txt"
   putStrLn "Part 1"
-  print $ part1 input
+  print $ solve createBasicAntiNodesForPair input
+  putStrLn "Part 2"
+  print $ solve createAntiNodesForPairWithResonantHarmonics input
