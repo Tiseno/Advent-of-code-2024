@@ -1,5 +1,6 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
+import qualified Data.Array      as Array
 import qualified Data.List.Split as Split
 import qualified Data.Map        as Map
 
@@ -47,6 +48,38 @@ part1 (width :: Int) (height :: Int) (steps :: Int) (robots :: Robots) =
       , br + if withinQuad p bot right then 1 else 0
       )
 
+type RobotArray = Array.Array (Int, Int) Char
+
+createRobotArray :: Int -> Int -> Robots -> RobotArray
+createRobotArray width height = foldr (\(p, _) a -> a Array.// [(p, 'R')]) (Array.listArray ((0,0),(width-1,height-1)) $ '.' <$ [(0 :: Int)..])
+
+printRobots :: Int -> Int -> RobotArray -> IO ()
+printRobots width height robotArray =
+   mapM_ printRow [0..(height-1)]
+  where
+    printRow i = do
+      mapM_ (\j -> putStr $ (: []) $ robotArray Array.! (j, i)) [0..(width-1)]
+      putStrLn ""
+
+isSus :: Int -> Int -> RobotArray -> Bool
+isSus width height robotArray =
+  any checkRow robotMatrix
+  where
+    checkRow (row :: String) = length (Split.splitOn "RRRRRRRRRRRRRRRRRRRRRRRRRRRRRR" row) > 1
+    robotMatrix :: [String]
+    robotMatrix = foldr accumulateRows [] [0..(height-1)]
+    accumulateRows y rows = rows ++ [foldr (accumulateCells y) "" [0..(width-1)]]
+    accumulateCells y x row = row ++ [robotArray Array.! (x, y)]
+
+part2 :: Int -> Int -> Int -> Robots -> IO ()
+part2 width height step robots = do
+  let robotArray = createRobotArray width height robots
+  if isSus width height robotArray
+    then do
+      putStrLn $ "Step " ++ show step
+      printRobots width height robotArray
+    else part2 width height (step + 1) (moveAllRobots width height robots)
+
 main :: IO ()
 main = do
   exampleInput <- parseInput <$> readFile "input.example.txt"
@@ -55,3 +88,5 @@ main = do
   input <- parseInput <$> readFile "input.txt"
   putStrLn "Part 1"
   print $ part1 101 103 100 input
+  putStrLn "Part 2"
+  part2 101 103 0 input
