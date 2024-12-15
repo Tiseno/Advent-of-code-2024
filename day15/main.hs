@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 import qualified Control.Monad               as Monad
 import qualified Control.Monad.ST            as ST
 import qualified Data.List.Split             as Split
@@ -70,8 +71,8 @@ tryMoveDirection dir (width, _) pos vec = do
 findRobot :: VecMatrix Char -> Pos
 findRobot ((width, _), vec) = let Just r = UV.elemIndex '@' vec in (r `mod` width, r `div` width)
 
-findAllBoxes :: VecMatrix Char -> [Pos]
-findAllBoxes ((width, _), vec) = fmap (\i -> (i `mod` width, i `div` width)) $ UV.toList $ UV.elemIndices 'O' vec
+findAll :: Char -> VecMatrix Char -> [Pos]
+findAll c ((width, _), vec) = fmap (\i -> (i `mod` width, i `div` width)) $ UV.toList $ UV.elemIndices c vec
 
 part1 :: (VecMatrix Char, [Char]) -> IO ()
 part1 (warehouse :: VecMatrix Char, instructions :: [Char]) =
@@ -83,10 +84,124 @@ part1 (warehouse :: VecMatrix Char, instructions :: [Char]) =
         UV.freeze v
    in do
      putStrLn $ showVecMatrix (bounds, finalVec)
-     print $ sum $ (\(x, y) -> y * 100 + x) <$> findAllBoxes (bounds, finalVec)
+     print $ sum $ (\(x, y) -> y * 100 + x) <$> findAll 'O' (bounds, finalVec)
+
+wideMatrixFromListMatrix :: [[Char]] -> VecMatrix Char
+wideMatrixFromListMatrix listMatrix =
+  let height = length listMatrix
+      width = length (head listMatrix) * 2
+      size = height * width
+      vec = ST.runST $ do
+        v <- MUV.new size
+        Monad.forM_ (zip [0..] listMatrix) $ \(y, row) -> do
+          Monad.forM_ (zip [0,2..] row) $ \(x, e) -> do
+            Monad.when (e == '.' || e == '#') $ do
+                MUV.write v (x + y * width) e
+                MUV.write v (1 + x + y * width) e
+            Monad.when (e == '@') $ do
+                MUV.write v (x + y * width) '@'
+                MUV.write v (1 + x + y * width) '.'
+            Monad.when (e == 'O') $ do
+                MUV.write v (x + y * width) '['
+                MUV.write v (1 + x + y * width) ']'
+        UV.freeze v
+   in ((width, height), vec)
+
+parseInput2 :: [Char] -> (VecMatrix Char, [Char])
+parseInput2 input =
+  let [warehouseMap, robotInstructions] = Split.splitOn "\n\n" input
+   in (wideMatrixFromListMatrix $ lines warehouseMap, concat $ lines robotInstructions)
+
+canMoveDirectionWide :: Char -> (Int, Int) -> Pos -> MUV.MVector s Char -> ST.ST s Bool
+canMoveDirectionWide dir bounds@(width, _) pos@(x, y) vec = do
+  let nextPos = move dir pos
+  current <- MUV.read vec $ posToIndex width pos
+  if current == '@'
+    then canMoveDirectionWide dir bounds nextPos vec
+    else if current == '.'
+      then pure True
+      else if current == '#'
+        then pure False
+        else if dir == '^' || dir == 'v'
+          then if current == '['
+            then do
+              this <- canMoveDirectionWide dir bounds nextPos vec
+              right <- canMoveDirectionWide dir bounds (move dir (x + 1, y)) vec
+              pure $ this && right -- We can move if both can move
+            else do -- == ']'
+              left <- canMoveDirectionWide dir bounds (move dir (x - 1, y)) vec
+              this <- canMoveDirectionWide dir bounds nextPos vec
+              pure $ left && this -- We can move if both can move
+          else do -- == '<' || == '>'
+            let nextNextPos = move dir nextPos
+            canMoveDirectionWide dir bounds nextNextPos vec -- We can move if next next can move
+
+moveDirectionWide :: Char -> (Int, Int) -> Pos -> MUV.MVector s Char -> ST.ST s ()
+moveDirectionWide dir bounds@(width, _) pos@(x, y) vec = do
+  let nextPos = move dir pos
+  current <- MUV.read vec $ posToIndex width pos
+  if current == '.'
+     then pure ()
+     else if current == '#'
+      then error "We cannot move a wall"
+      else if current == '@'
+        then do
+          moveDirectionWide dir bounds nextPos vec
+          MUV.write vec (posToIndex width nextPos) current
+          MUV.write vec (posToIndex width pos) '.'
+        else if dir == '^' || dir == 'v'
+          then if current == '['
+            then do
+              let rightPos = (x + 1, y)
+              let nextRightPos = move dir rightPos
+              moveDirectionWide dir bounds nextPos vec
+              moveDirectionWide dir bounds nextRightPos vec
+              MUV.write vec (posToIndex width nextPos) '['
+              MUV.write vec (posToIndex width nextRightPos) ']'
+              MUV.write vec (posToIndex width pos) '.'
+              MUV.write vec (posToIndex width rightPos) '.'
+            else do
+              let leftPos = (x - 1, y)
+              let nextLeftPos = move dir leftPos
+              moveDirectionWide dir bounds nextLeftPos vec
+              moveDirectionWide dir bounds nextPos vec
+              MUV.write vec (posToIndex width nextLeftPos) '['
+              MUV.write vec (posToIndex width nextPos) ']'
+              MUV.write vec (posToIndex width leftPos) '.'
+              MUV.write vec (posToIndex width pos) '.'
+          else do
+            let nextNextPos = move dir nextPos
+            next <- MUV.read vec $ posToIndex width nextPos
+            moveDirectionWide dir bounds nextNextPos vec
+            MUV.write vec (posToIndex width nextNextPos) next
+            MUV.write vec (posToIndex width nextPos) current
+            MUV.write vec (posToIndex width pos) '.'
+
+tryMoveDirectionWide :: Char -> (Int, Int) -> Pos -> MUV.MVector s Char -> ST.ST s Pos
+tryMoveDirectionWide dir bounds pos vec = do
+  canMove <- canMoveDirectionWide dir bounds pos vec
+  if canMove
+    then do
+      moveDirectionWide dir bounds pos vec
+      pure (move dir pos)
+    else pure pos
+
+part2 :: (VecMatrix Char, [Char]) -> IO ()
+part2 (warehouse :: VecMatrix Char, instructions :: [Char]) =
+  let (bounds, immVec) = warehouse
+      robotPos = findRobot warehouse
+      finalVec = ST.runST $ do
+        v <- UV.thaw immVec
+        Monad.foldM_ (\pos dir -> tryMoveDirectionWide dir bounds pos v) robotPos instructions
+        UV.freeze v
+   in do
+     putStrLn $ showVecMatrix (bounds, finalVec)
+     print $ sum $ (\(x, y) -> y * 100 + x) <$> findAll '[' (bounds, finalVec)
 
 main :: IO ()
 main = do
-  input <- parseInput <$> readFile "input.txt"
+  file <- readFile "input.txt"
   putStrLn "Part 1"
-  part1 input
+  part1 $ parseInput file
+  putStrLn "Part 2"
+  part2 $ parseInput2 file
